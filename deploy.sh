@@ -116,9 +116,9 @@ deploy_with_changeset() {
         --stack-name "${STACK_NAME}" \
         --template-body "file://${TEMPLATE_FILE}" \
         --change-set-name "${changeset_name}" \
-        --parameter-overrides \
-            ProjectName="${PROJECT_NAME}" \
-            DBMasterPassword="${DB_PASSWORD}" \
+        --parameters \
+            ParameterKey=ProjectName,ParameterValue="${PROJECT_NAME}" \
+            ParameterKey=DBMasterPassword,ParameterValue="${DB_PASSWORD}" \
         --capabilities CAPABILITY_IAM \
         --region "${REGION}"
     
@@ -220,9 +220,9 @@ if [ "${DEPLOY_MODE}" = "CREATE" ]; then
     aws cloudformation deploy \
         --template-file "${TEMPLATE_FILE}" \
         --stack-name "${STACK_NAME}" \
-        --parameter-overrides \
-            ProjectName="${PROJECT_NAME}" \
-            DBMasterPassword="${DB_PASSWORD}" \
+        --parameters \
+            ParameterKey=ProjectName,ParameterValue="${PROJECT_NAME}" \
+            ParameterKey=DBMasterPassword,ParameterValue="${DB_PASSWORD}" \
         --capabilities CAPABILITY_IAM \
         --region "${REGION}"
     
@@ -377,6 +377,9 @@ aws cloudformation create-change-set \
     --stack-name ${STACK_NAME} \
     --template-body file://${TEMPLATE_FILE} \
     --change-set-name update-$(date +%Y%m%d-%H%M%S) \
+    --parameters \
+        ParameterKey=ProjectName,ParameterValue=${PROJECT_NAME} \
+        ParameterKey=DBMasterPassword,ParameterValue=${DB_PASSWORD} \
     --capabilities CAPABILITY_IAM \
     --region ${REGION}
 
@@ -405,8 +408,49 @@ aws s3 ls s3://${S3_BUCKET}/ --recursive --region ${REGION}
 # RDSステータス確認
 aws rds describe-db-instances --db-instance-identifier ${PROJECT_NAME}-postgres-20250611 --region ${REGION}
 
+# === データベース直接接続 ===
+psql -h ${RDS_ENDPOINT} -p ${RDS_PORT} -U postgres -d postgres
+
+# テーブル一覧確認
+psql -h ${RDS_ENDPOINT} -p ${RDS_PORT} -U postgres -d postgres -c "\\dt"
+
+# === S3フォルダ構成 ===
+# s3://${S3_BUCKET}/
+# ├── csv/               # CSV投入フォルダ（自動処理）
+# ├── init-sql/          # 初期テーブル作成SQL
+# ├── query-results/     # クエリ結果出力
+# └── layers/            # Lambda Layer
+
+# === ログ監視 ===
+aws logs tail /aws/lambda/${TABLE_CREATOR_FUNCTION_NAME} --follow --region ${REGION}
+aws logs tail /aws/lambda/${CSV_PROCESSOR_FUNCTION_NAME} --follow --region ${REGION}
+aws logs tail /aws/lambda/${QUERY_EXECUTOR_FUNCTION_NAME} --follow --region ${REGION}
+
+# === 運用例 ===
+
+# CSVデータ投入
+aws s3 cp sales_data_20250611.csv s3://${S3_BUCKET}/csv/sales_data_20250611.csv --region ${REGION}
+
+# データ確認
+aws lambda invoke \
+    --function-name ${QUERY_EXECUTOR_FUNCTION_NAME} \
+    --payload '{"sql":"SELECT COUNT(*) FROM sales_data_20250611_20250612_120000;","output_format":"json","output_name":"count_check"}' \
+    --region ${REGION} \
+    check_result.json
+
+# 集計処理
+aws lambda invoke \
+    --function-name ${QUERY_EXECUTOR_FUNCTION_NAME} \
+    --payload '{"sql":"SELECT category, SUM(amount) as total_amount FROM sales_data_20250611_20250612_120000 GROUP BY category ORDER BY total_amount DESC;","output_format":"csv","output_name":"category_summary"}' \
+    --region ${REGION} \
+    aggregation_result.json
+
 # === スタック削除 ===
 aws cloudformation delete-stack --stack-name ${STACK_NAME} --region ${REGION}
+
+# === 一時バケット削除（必要に応じて） ===
+aws s3 rm s3://${TEMP_BUCKET_NAME} --recursive --region ${REGION}
+aws s3 rb s3://${TEMP_BUCKET_NAME} --region ${REGION}
 
 EOF
 
@@ -477,27 +521,4 @@ echo "3. 問題があればキャンセルしてロールバック可能です"
 echo ""
 echo "🎉 デプロイ完了! 🎉"
 
-exit 0ベース直接接続
-psql -h ${RDS_ENDPOINT} -p ${RDS_PORT} -U postgres -d postgres
-
-# テーブル一覧確認
-psql -h ${RDS_ENDPOINT} -p ${RDS_PORT} -U postgres -d postgres -c "\\dt"
-
-# === S3フォルダ構成 ===
-# s3://${S3_BUCKET}/
-# ├── csv/               # CSV投入フォルダ（自動処理）
-# ├── init-sql/          # 初期テーブル作成SQL
-# ├── query-results/     # クエリ結果出力
-# └── layers/            # Lambda Layer
-
-# === ログ監視 ===
-aws logs tail /aws/lambda/${TABLE_CREATOR_FUNCTION_NAME} --follow --region ${REGION}
-aws logs tail /aws/lambda/${CSV_PROCESSOR_FUNCTION_NAME} --follow --region ${REGION}
-aws logs tail /aws/lambda/${QUERY_EXECUTOR_FUNCTION_NAME} --follow --region ${REGION}
-
-# === 運用例 ===
-
-# CSVデータ投入
-aws s3 cp sales_data_20250611.csv s3://${S3_BUCKET}/csv/sales_data_20250611.csv --region ${REGION}
-
-# データ
+exit 0
