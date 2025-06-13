@@ -1,0 +1,167 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ETL System - Main Stack (Parent)'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: 'etl-csv-to-rds-postgresql'
+    Description: 'Project name for resource naming'
+
+  DBMasterUsername:
+    Type: String
+    Default: 'postgres'
+    Description: 'RDS Master Username'
+
+  DBMasterPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: 'RDS Master Password (minimum 8 characters)'
+    Default: 'TestPassword123!'
+
+  SourceBucket:
+    Type: String
+    Description: 'S3 Bucket containing Lambda code and SQL files'
+
+  CSVProcessorCodeKey:
+    Type: String
+    Default: 'lambda-code/csv_processor.zip'
+    Description: 'S3 Key for CSV Processor Lambda code'
+
+  QueryExecutorCodeKey:
+    Type: String
+    Default: 'lambda-code/query_executor.zip'
+    Description: 'S3 Key for Query Executor Lambda code'
+
+  TableCreatorCodeKey:
+    Type: String
+    Default: 'lambda-code/table_creator.zip'
+    Description: 'S3 Key for Table Creator Lambda code'
+
+  Psycopg2LayerKey:
+    Type: String
+    Default: 'layers/psycopg2-layer.zip'
+    Description: 'S3 Key for psycopg2 Lambda Layer'
+
+  InitSqlPrefix:
+    Type: String
+    Default: 'init-sql/'
+    Description: 'S3 Prefix for initialization SQL files'
+
+Resources:
+  # Step 1: ネットワーク基盤
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub 'https://${SourceBucket}.s3.${AWS::Region}.amazonaws.com/cfn-templates/02-network-stack.yaml'
+      Parameters:
+        ProjectName: !Ref ProjectName
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-network-stack'
+
+  # Step 2: データベースとストレージ
+  DatabaseStorageStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: NetworkStack
+    Properties:
+      TemplateURL: !Sub 'https://${SourceBucket}.s3.${AWS::Region}.amazonaws.com/cfn-templates/03-database-storage-stack.yaml'
+      Parameters:
+        ProjectName: !Ref ProjectName
+        DBMasterUsername: !Ref DBMasterUsername
+        DBMasterPassword: !Ref DBMasterPassword
+        VPCId: !GetAtt NetworkStack.Outputs.VPCId
+        PrivateSubnet1Id: !GetAtt NetworkStack.Outputs.PrivateSubnet1Id
+        PrivateSubnet2Id: !GetAtt NetworkStack.Outputs.PrivateSubnet2Id
+        LambdaSecurityGroupId: !GetAtt NetworkStack.Outputs.LambdaSecurityGroupId
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-database-storage-stack'
+
+  # Step 3: Lambda関数群（通知設定なし）
+  LambdaStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - NetworkStack
+      - DatabaseStorageStack
+    Properties:
+      TemplateURL: !Sub 'https://${SourceBucket}.s3.${AWS::Region}.amazonaws.com/cfn-templates/04-lambda-stack.yaml'
+      Parameters:
+        ProjectName: !Ref ProjectName
+        SourceBucket: !Ref SourceBucket
+        CSVProcessorCodeKey: !Ref CSVProcessorCodeKey
+        QueryExecutorCodeKey: !Ref QueryExecutorCodeKey
+        TableCreatorCodeKey: !Ref TableCreatorCodeKey
+        Psycopg2LayerKey: !Ref Psycopg2LayerKey
+        InitSqlPrefix: !Ref InitSqlPrefix
+        DBMasterUsername: !Ref DBMasterUsername
+        DBMasterPassword: !Ref DBMasterPassword
+        VPCId: !GetAtt NetworkStack.Outputs.VPCId
+        PrivateSubnet1Id: !GetAtt NetworkStack.Outputs.PrivateSubnet1Id
+        PrivateSubnet2Id: !GetAtt NetworkStack.Outputs.PrivateSubnet2Id
+        LambdaSecurityGroupId: !GetAtt NetworkStack.Outputs.LambdaSecurityGroupId
+        RDSEndpoint: !GetAtt DatabaseStorageStack.Outputs.RDSEndpoint
+        RDSPort: !GetAtt DatabaseStorageStack.Outputs.RDSPort
+        DataBucketName: !GetAtt DatabaseStorageStack.Outputs.DataBucketName
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-lambda-stack'
+
+  # Step 4: S3通知設定とオーケストレーション
+  OrchestrationStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - NetworkStack
+      - DatabaseStorageStack
+      - LambdaStack
+    Properties:
+      TemplateURL: !Sub 'https://${SourceBucket}.s3.${AWS::Region}.amazonaws.com/cfn-templates/05-orchestration-stack.yaml'
+      Parameters:
+        ProjectName: !Ref ProjectName
+        DataBucketName: !GetAtt DatabaseStorageStack.Outputs.DataBucketName
+        CSVProcessorFunctionArn: !GetAtt LambdaStack.Outputs.CSVProcessorFunctionArn
+        TableCreatorFunctionName: !GetAtt LambdaStack.Outputs.TableCreatorFunctionName
+        VPCId: !GetAtt NetworkStack.Outputs.VPCId
+        PrivateSubnet1Id: !GetAtt NetworkStack.Outputs.PrivateSubnet1Id
+        PrivateSubnet2Id: !GetAtt NetworkStack.Outputs.PrivateSubnet2Id
+        LambdaSecurityGroupId: !GetAtt NetworkStack.Outputs.LambdaSecurityGroupId
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-orchestration-stack'
+
+Outputs:
+  NetworkStackId:
+    Description: Network Stack ID
+    Value: !Ref NetworkStack
+
+  DatabaseStorageStackId:
+    Description: Database Storage Stack ID
+    Value: !Ref DatabaseStorageStack
+
+  LambdaStackId:
+    Description: Lambda Stack ID
+    Value: !Ref LambdaStack
+
+  OrchestrationStackId:
+    Description: Orchestration Stack ID
+    Value: !Ref OrchestrationStack
+
+  DataBucketName:
+    Description: Name of the S3 bucket for CSV data and results
+    Value: !GetAtt DatabaseStorageStack.Outputs.DataBucketName
+
+  RDSEndpoint:
+    Description: RDS PostgreSQL Endpoint
+    Value: !GetAtt DatabaseStorageStack.Outputs.RDSEndpoint
+
+  TableCreatorFunction:
+    Description: Table Creator Lambda Function Name
+    Value: !GetAtt LambdaStack.Outputs.TableCreatorFunctionName
+
+  CSVProcessorFunction:
+    Description: CSV Processor Lambda Function Name
+    Value: !GetAtt LambdaStack.Outputs.CSVProcessorFunctionName
+
+  QueryExecutorFunction:
+    Description: Query Executor Lambda Function Name
+    Value: !GetAtt LambdaStack.Outputs.QueryExecutorFunctionName

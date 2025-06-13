@@ -1,5 +1,8 @@
 # テーブル定義（機密情報）
+sql/
+init-sql/
 *.sql
+
 
 # Python関連
 __pycache__/

@@ -1,0 +1,254 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ETL System - Orchestration and Notification Stack'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: 'Project name for resource naming'
+
+  DataBucketName:
+    Type: String
+    Description: 'Data Bucket Name from Database Stack'
+
+  CSVProcessorFunctionArn:
+    Type: String
+    Description: 'CSV Processor Function ARN from Lambda Stack'
+
+  TableCreatorFunctionName:
+    Type: String
+    Description: 'Table Creator Function Name from Lambda Stack'
+
+  # VPC関連パラメータを追加
+  VPCId:
+    Type: String
+    Description: 'VPC ID from Network Stack'
+
+  PrivateSubnet1Id:
+    Type: String
+    Description: 'Private Subnet 1 ID from Network Stack'
+
+  PrivateSubnet2Id:
+    Type: String
+    Description: 'Private Subnet 2 ID from Network Stack'
+
+  LambdaSecurityGroupId:
+    Type: String
+    Description: 'Lambda Security Group ID from Network Stack'
+
+Resources:
+  # カスタムリソース用Lambda実行ロール
+  CustomResourceLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-custom-resource-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole  # VPC用権限追加
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: InvokeLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${TableCreatorFunctionName}'
+        - PolicyName: S3NotificationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketNotification
+                  - s3:PutBucketNotification
+                Resource: !Sub 'arn:aws:s3:::${DataBucketName}'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-custom-resource-execution-role'
+
+  # S3からLambdaへの実行権限
+  CSVProcessorLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CSVProcessorFunctionArn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub 'arn:aws:s3:::${DataBucketName}'
+
+  # カスタムリソース用Lambda関数（テーブル作成 + S3通知設定）
+  CustomResourceLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-custom-resource'
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt CustomResourceLambdaExecutionRole.Arn
+      Timeout: 900
+      MemorySize: 512
+      VpcConfig:  # VPC設定を追加
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
+        SubnetIds:
+          - !Ref PrivateSubnet1Id
+          - !Ref PrivateSubnet2Id
+      Environment:
+        Variables:
+          TABLE_CREATOR_FUNCTION_NAME: !Ref TableCreatorFunctionName
+          DATA_BUCKET_NAME: !Ref DataBucketName
+          CSV_PROCESSOR_FUNCTION_ARN: !Ref CSVProcessorFunctionArn
+      Code:
+        ZipFile: !Sub |
+          import json
+          import boto3
+          import cfnresponse
+          import traceback
+
+          def lambda_handler(event, context):
+              print(f"Event: {json.dumps(event)}")
+
+              try:
+                  request_type = event['RequestType']
+
+                  if request_type == 'Create':
+                      # Step 1: テーブル作成Lambda実行
+                      lambda_client = boto3.client('lambda')
+                      table_creator_function = event['ResourceProperties']['TableCreatorFunctionName']
+
+                      print(f"テーブル作成Lambda実行: {table_creator_function}")
+
+                      try:
+                          response = lambda_client.invoke(
+                              FunctionName=table_creator_function,
+                              InvocationType='RequestResponse',
+                              Payload=json.dumps({})
+                          )
+
+                          payload = response['Payload'].read()
+                          print(f"Lambda実行レスポンス: {payload}")
+                          
+                          if response.get('StatusCode') != 200:
+                              raise Exception(f"Lambda実行失敗: StatusCode={response.get('StatusCode')}")
+                          
+                          result = json.loads(payload)
+                          print(f"テーブル作成結果: {result}")
+                          
+                      except Exception as e:
+                          print(f"テーブル作成Lambda実行エラー: {str(e)}")
+                          print(f"詳細: {traceback.format_exc()}")
+                          raise
+
+                      # Step 2: S3バケット通知設定
+                      s3_client = boto3.client('s3')
+                      bucket_name = event['ResourceProperties']['DataBucketName']
+                      csv_processor_arn = event['ResourceProperties']['CSVProcessorFunctionArn']
+
+                      print(f"S3通知設定開始: {bucket_name}")
+
+                      notification_config = {
+                          'LambdaConfigurations': [
+                              {
+                                  'Id': 'csv-processing-trigger',
+                                  'LambdaFunctionArn': csv_processor_arn,
+                                  'Events': ['s3:ObjectCreated:*'],
+                                  'Filter': {
+                                      'Key': {
+                                          'FilterRules': [
+                                              {
+                                                  'Name': 'prefix',
+                                                  'Value': 'csv/'
+                                              },
+                                              {
+                                                  'Name': 'suffix',
+                                                  'Value': '.csv'
+                                              }
+                                          ]
+                                      }
+                                  }
+                              }
+                          ]
+                      }
+
+                      try:
+                          s3_client.put_bucket_notification_configuration(
+                              Bucket=bucket_name,
+                              NotificationConfiguration=notification_config
+                          )
+                          print("S3通知設定完了")
+                      except Exception as e:
+                          print(f"S3通知設定エラー: {str(e)}")
+                          print(f"詳細: {traceback.format_exc()}")
+                          raise
+
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                          'Message': 'テーブル作成とS3通知設定完了',
+                          'TableCreationResult': str(result)
+                      }, 'ETLInitializationResource')
+
+                  elif request_type == 'Update':
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                          'Message': '更新時はスキップ'
+                      }, 'ETLInitializationResource')
+
+                  elif request_type == 'Delete':
+                      # S3通知設定の削除
+                      try:
+                          s3_client = boto3.client('s3')
+                          bucket_name = event['ResourceProperties']['DataBucketName']
+
+                          print(f"S3通知設定削除: {bucket_name}")
+
+                          s3_client.put_bucket_notification_configuration(
+                              Bucket=bucket_name,
+                              NotificationConfiguration={}
+                          )
+
+                          print("S3通知設定削除完了")
+                      except Exception as e:
+                          print(f"S3通知設定削除エラー（無視）: {str(e)}")
+
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                          'Message': '削除時の処理完了'
+                      }, 'ETLInitializationResource')
+
+              except Exception as e:
+                  print(f"エラー: {str(e)}")
+                  print(f"詳細: {traceback.format_exc()}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {
+                      'Error': str(e)
+                  }, 'ETLInitializationResource')
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-custom-resource'
+
+  # カスタムリソース（テーブル作成とS3通知設定を一括実行）
+  ETLInitializationCustomResource:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - CSVProcessorLambdaPermission
+    Properties:
+      ServiceToken: !GetAtt CustomResourceLambdaFunction.Arn
+      TableCreatorFunctionName: !Ref TableCreatorFunctionName
+      DataBucketName: !Ref DataBucketName
+      CSVProcessorFunctionArn: !Ref CSVProcessorFunctionArn
+
+Outputs:
+  CustomResourceFunctionName:
+    Description: Custom Resource Lambda Function Name
+    Value: !Ref CustomResourceLambdaFunction
+    Export:
+      Name: !Sub '${ProjectName}-CustomResourceFunctionName'
+
+  ETLInitializationStatus:
+    Description: ETL Initialization Status
+    Value: !Ref ETLInitializationCustomResource
+
+  SetupCompleted:
+    Description: ETL System Setup Completion
+    Value: 'ETL system setup completed successfully'

@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ETL System - Database and Storage Stack (Debug Version)'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: 'Project name for resource naming'
+
+  DBMasterUsername:
+    Type: String
+    Description: 'RDS Master Username'
+
+  DBMasterPassword:
+    Type: String
+    NoEcho: true
+    Description: 'RDS Master Password'
+
+  VPCId:
+    Type: String
+    Description: 'VPC ID from Network Stack'
+
+  PrivateSubnet1Id:
+    Type: String
+    Description: 'Private Subnet 1 ID from Network Stack'
+
+  PrivateSubnet2Id:
+    Type: String
+    Description: 'Private Subnet 2 ID from Network Stack'
+
+  LambdaSecurityGroupId:
+    Type: String
+    Description: 'Lambda Security Group ID from Network Stack'
+
+Resources:
+  # RDS Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS
+      SubnetIds:
+        - !Ref PrivateSubnet1Id
+        - !Ref PrivateSubnet2Id
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-db-subnet-group'
+
+  # RDS Security Group
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref LambdaSecurityGroupId
+          Description: PostgreSQL from Lambda
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-rds-sg'
+
+  # RDS Instance (最小構成)
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub '${ProjectName}-pg-test'
+      DBInstanceClass: db.t3.micro
+      Engine: postgres
+      AllocatedStorage: 20
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Ref DBMasterPassword
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !GetAtt RDSSecurityGroup.GroupId
+
+  # データ用S3バケット
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-data-${AWS::AccountId}-test'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-data-bucket'
+
+Outputs:
+  RDSInstanceId:
+    Description: RDS Instance ID
+    Value: !Ref RDSInstance
+    Export:
+      Name: !Sub '${ProjectName}-RDSInstanceId'
+
+  RDSEndpoint:
+    Description: RDS PostgreSQL Endpoint
+    Value: !GetAtt RDSInstance.Endpoint.Address
+    Export:
+      Name: !Sub '${ProjectName}-RDSEndpoint'
+
+  RDSPort:
+    Description: RDS PostgreSQL Port
+    Value: !GetAtt RDSInstance.Endpoint.Port
+    Export:
+      Name: !Sub '${ProjectName}-RDSPort'
+
+  DataBucketName:
+    Description: Name of the S3 bucket for CSV data and results
+    Value: !Ref DataBucket
+    Export:
+      Name: !Sub '${ProjectName}-DataBucketName'
+
+  DataBucketArn:
+    Description: ARN of the S3 bucket for CSV data and results
+    Value: !GetAtt DataBucket.Arn
+    Export:
+      Name: !Sub '${ProjectName}-DataBucketArn'
+
+  DBSubnetGroupName:
+    Description: DB Subnet Group Name
+    Value: !Ref DBSubnetGroup
+    Export:
+      Name: !Sub '${ProjectName}-DBSubnetGroupName'
