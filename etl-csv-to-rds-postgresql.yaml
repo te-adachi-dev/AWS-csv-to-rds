@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'ETL CSV to RDS PostgreSQL System with 3 Lambda Functions'
+Description: 'ETL CSV to RDS PostgreSQL System with 3 Lambda Functions - 改善版'
 
 Parameters:
   ProjectName:
@@ -45,7 +45,7 @@ Resources:
       InternetGatewayId: !Ref InternetGateway
       VpcId: !Ref VPC
 
-  # Subnets
+  # Subnets - 3つのプライベートサブネット（RDS用）
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -65,6 +65,16 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-private-subnet-2'
+
+  PrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [2, !GetAZs '']
+      CidrBlock: 10.0.3.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-private-subnet-3'
 
   PublicSubnet1:
     Type: AWS::EC2::Subnet
@@ -120,11 +130,17 @@ Resources:
       RouteTableId: !Ref PrivateRouteTable
       SubnetId: !Ref PrivateSubnet2
 
-  # S3 Bucket
+  PrivateSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet3
+
+  # S3 Bucket (シンプル版)
   S3Bucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub 'etl-csv-to-rds-postgresql-bucket-${AWS::AccountId}-20250611'
+      BucketName: !Sub 'etl-csv-to-rds-postgresql-bucket-${AWS::AccountId}-20250612'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -132,20 +148,42 @@ Resources:
         RestrictPublicBuckets: true
       VersioningConfiguration:
         Status: Enabled
-      NotificationConfiguration:
-        LambdaConfigurations:
-          - Event: s3:ObjectCreated:*
-            Function: !GetAtt CSVProcessorLambdaFunction.Arn
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: csv/
-                  - Name: suffix
-                    Value: .csv
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-main-bucket'
+
+  # S3 Bucket Policy（循環依存を避けるため、条件付きで設定）
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: S3Bucket
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowCurrentAccount
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action:
+              - 's3:GetObject'
+              - 's3:PutObject'
+              - 's3:DeleteObject'
+              - 's3:ListBucket'
+            Resource:
+              - !Sub 'arn:aws:s3:::${S3Bucket}'
+              - !Sub 'arn:aws:s3:::${S3Bucket}/*'
+          # 将来的なクロスアカウント対応用（必要時にコメントアウト解除）
+          # - Sid: AllowCrossAccountPut
+          #   Effect: Allow
+          #   Principal:
+          #     AWS: 'arn:aws:iam::OTHER-ACCOUNT-ID:root'
+          #   Action:
+          #     - 's3:PutObject'
+          #     - 's3:PutObjectAcl'
+          #   Resource: !Sub 'arn:aws:s3:::${S3Bucket}/csv/*'
+          #   Condition:
+          #     StringEquals:
+          #       's3:x-amz-acl': 'bucket-owner-full-control'
 
   # S3 VPC Endpoint
   S3VPCEndpoint:
@@ -167,6 +205,7 @@ Resources:
       SubnetIds:
         - !Ref PrivateSubnet1
         - !Ref PrivateSubnet2
+        - !Ref PrivateSubnet3
       SecurityGroupIds:
         - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
@@ -181,6 +220,22 @@ Resources:
       SubnetIds:
         - !Ref PrivateSubnet1
         - !Ref PrivateSubnet2
+        - !Ref PrivateSubnet3
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
+  # Monitoring VPC Endpoint（CloudWatch）
+  MonitoringVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.monitoring'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+        - !Ref PrivateSubnet3
       SecurityGroupIds:
         - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
@@ -195,8 +250,8 @@ Resources:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          CidrIp: 10.0.0.0/16
-          Description: HTTPS from VPC
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+          Description: HTTPS from Lambda SG only
       SecurityGroupEgress:
         - IpProtocol: tcp
           FromPort: 443
@@ -250,6 +305,7 @@ Resources:
       SubnetIds:
         - !Ref PrivateSubnet1
         - !Ref PrivateSubnet2
+        - !Ref PrivateSubnet3
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-db-subnet-group'
@@ -258,7 +314,7 @@ Resources:
   RDSInstance:
     Type: AWS::RDS::DBInstance
     Properties:
-      DBInstanceIdentifier: !Sub '${ProjectName}-postgres-20250611'
+      DBInstanceIdentifier: !Sub '${ProjectName}-postgres-20250612'
       DBInstanceClass: db.t3.micro
       Engine: postgres
       EngineVersion: '15.8'
@@ -274,9 +330,29 @@ Resources:
       PubliclyAccessible: false
       StorageEncrypted: true
       DeletionProtection: false
+      EnablePerformanceInsights: true
+      PerformanceInsightsRetentionPeriod: 7
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt RDSEnhancedMonitoringRole.Arn
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-postgres'
+
+  # RDS Enhanced Monitoring Role
+  RDSEnhancedMonitoringRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: monitoring.rds.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole'
+      Path: /
 
   # Lambda Execution Role
   LambdaExecutionRole:
@@ -320,6 +396,21 @@ Resources:
                   - 'logs:DescribeLogStreams'
                   - 'logs:DescribeLogGroups'
                 Resource: '*'
+        - PolicyName: VPCEndpointAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ec2:CreateNetworkInterface'
+                  - 'ec2:DescribeNetworkInterfaces'
+                  - 'ec2:DeleteNetworkInterface'
+                  - 'ec2:AttachNetworkInterface'
+                  - 'ec2:DetachNetworkInterface'
+                  - 'ec2:DescribeSecurityGroups'
+                  - 'ec2:DescribeSubnets'
+                  - 'ec2:DescribeVpcs'
+                Resource: '*'
 
   # psycopg2 Lambda Layer
   Psycopg2Layer:
@@ -349,6 +440,7 @@ Resources:
         SubnetIds:
           - !Ref PrivateSubnet1
           - !Ref PrivateSubnet2
+          - !Ref PrivateSubnet3
       Environment:
         Variables:
           DB_HOST: !GetAtt RDSInstance.Endpoint.Address
@@ -363,6 +455,8 @@ Resources:
         S3Key: 'lambda-code/table_creator.zip'
       Layers:
         - !Ref Psycopg2Layer
+      DeadLetterConfig:
+        TargetArn: !GetAtt DeadLetterQueue.Arn
 
   # Lambda 2: CSV処理Lambda関数（S3トリガー）
   CSVProcessorLambdaFunction:
@@ -374,12 +468,14 @@ Resources:
       Role: !GetAtt LambdaExecutionRole.Arn
       Timeout: 900
       MemorySize: 1024
+      ReservedConcurrencyLimit: 10
       VpcConfig:
         SecurityGroupIds:
           - !Ref LambdaSecurityGroup
         SubnetIds:
           - !Ref PrivateSubnet1
           - !Ref PrivateSubnet2
+          - !Ref PrivateSubnet3
       Environment:
         Variables:
           DB_HOST: !GetAtt RDSInstance.Endpoint.Address
@@ -393,6 +489,8 @@ Resources:
         S3Key: 'lambda-code/csv_processor.zip'
       Layers:
         - !Ref Psycopg2Layer
+      DeadLetterConfig:
+        TargetArn: !GetAtt DeadLetterQueue.Arn
 
   # Lambda 3: 運用SQL実行Lambda関数（手動実行用）
   QueryExecutorLambdaFunction:
@@ -410,6 +508,7 @@ Resources:
         SubnetIds:
           - !Ref PrivateSubnet1
           - !Ref PrivateSubnet2
+          - !Ref PrivateSubnet3
       Environment:
         Variables:
           DB_HOST: !GetAtt RDSInstance.Endpoint.Address
@@ -424,8 +523,21 @@ Resources:
         S3Key: 'lambda-code/query_executor.zip'
       Layers:
         - !Ref Psycopg2Layer
+      DeadLetterConfig:
+        TargetArn: !GetAtt DeadLetterQueue.Arn
 
-  # S3からLambdaへの実行権限
+  # Dead Letter Queue for Lambda Functions
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-lambda-dlq'
+      MessageRetentionPeriod: 1209600  # 14 days
+      VisibilityTimeoutSeconds: 60
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-lambda-dlq'
+
+  # S3からLambdaへの実行権限 (S3Bucketの循環依存を避けるためDependsOn削除)
   CSVProcessorLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -433,6 +545,121 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: s3.amazonaws.com
       SourceArn: !Sub 'arn:aws:s3:::${S3Bucket}'
+
+  # S3 Bucket Notification Configuration (カスタムリソース)
+  S3BucketNotificationCustomResource:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - CSVProcessorLambdaFunction
+      - CSVProcessorLambdaPermission
+    Properties:
+      ServiceToken: !GetAtt S3NotificationLambda.Arn
+      BucketName: !Ref S3Bucket
+      LambdaArn: !GetAtt CSVProcessorLambdaFunction.Arn
+
+  # S3通知設定用Lambda関数
+  S3NotificationLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-s3-notification-setup'
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt S3NotificationLambdaRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import cfnresponse
+          
+          def lambda_handler(event, context):
+              try:
+                  s3 = boto3.client('s3')
+                  
+                  bucket_name = event['ResourceProperties']['BucketName']
+                  lambda_arn = event['ResourceProperties']['LambdaArn']
+                  
+                  if event['RequestType'] == 'Delete':
+                      # 削除時は通知設定をクリア
+                      s3.put_bucket_notification_configuration(
+                          Bucket=bucket_name,
+                          NotificationConfiguration={}
+                      )
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  
+                  # 通知設定
+                  notification_config = {
+                      'LambdaConfigurations': [
+                          {
+                              'Id': 'csv-processor-trigger',
+                              'LambdaFunctionArn': lambda_arn,
+                              'Events': ['s3:ObjectCreated:*'],
+                              'Filter': {
+                                  'Key': {
+                                      'FilterRules': [
+                                          {'Name': 'prefix', 'Value': 'csv/'},
+                                          {'Name': 'suffix', 'Value': '.csv'}
+                                      ]
+                                  }
+                              }
+                          }
+                      ]
+                  }
+                  
+                  s3.put_bucket_notification_configuration(
+                      Bucket=bucket_name,
+                      NotificationConfiguration=notification_config
+                  )
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+  # S3通知設定Lambda用のIAMロール
+  S3NotificationLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3NotificationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketNotification
+                  - s3:PutBucketNotification
+                Resource: !Sub 'arn:aws:s3:::${S3Bucket}'
+
+  # CloudWatch Log Groups (循環依存を避けるため関数名を直接指定)
+  TableCreatorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-table-creator'
+      RetentionInDays: 30
+
+  CSVProcessorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-csv-processor'
+      RetentionInDays: 30
+
+  QueryExecutorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-query-executor'
+      RetentionInDays: 30
 
 Outputs:
   S3BucketName:
@@ -482,3 +709,27 @@ Outputs:
     Value: !Ref DBMasterUsername
     Export:
       Name: !Sub '${AWS::StackName}-DatabaseUser'
+
+  VPCId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VPCId'
+
+  LambdaSecurityGroupId:
+    Description: Lambda Security Group ID
+    Value: !Ref LambdaSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaSecurityGroupId'
+
+  RDSSecurityGroupId:
+    Description: RDS Security Group ID
+    Value: !Ref RDSSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-RDSSecurityGroupId'
+
+  DeadLetterQueueUrl:
+    Description: Dead Letter Queue URL
+    Value: !Ref DeadLetterQueue
+    Export:
+      Name: !Sub '${AWS::StackName}-DeadLetterQueueUrl'
