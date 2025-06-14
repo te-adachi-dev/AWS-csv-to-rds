@@ -22,7 +22,7 @@ S3にアップロードされたCSVファイルを自動的にRDS PostgreSQLに�
 
 ```bash
 # リポジトリをクローン
-git clone <your-repository-url>
+git clone https://github.com/te-adachi-dev/AWS-csv-to-rds
 cd aws_cf3
 
 # ディレクトリ構造の確認
@@ -116,7 +116,7 @@ ls -la layers/psycopg2-layer.zip
 
 === 次のステップ ===
 1. テスト用CSVファイルをアップロード:
-   aws s3 cp your-file.csv s3://etl-csv-to-rds-postgresql-data-442901050053-test/csv/
+   aws s3 cp your-file.csv s3://etl-csv-to-rds-postgresql-data-xxxxxxxx-test/csv/
 
 2. Lambda関数ログの確認:
    aws logs tail /aws/lambda/etl-csv-to-rds-postgresql-csv-processor --follow
@@ -274,11 +274,3 @@ aws s3 mb s3://$BUCKET_NAME
                     │ (結果出力)  │
                     └─────────────┘
 ```
-
-## 📄 ライセンス
-
-[Your License]
-
----
-
-構築でお困りの場合は、Issueを作成してください。
