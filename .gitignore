@@ -66,4 +66,6 @@ logs/
 # デプロイメント関連の機密情報
 deployment_info.txt
 secrets.txt
-config.json
+config.json*.csv
+response.json
+test-event.json

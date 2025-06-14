@@ -152,7 +152,7 @@ Resources:
                       print(f"S3通知設定開始: {bucket_name}")
 
                       notification_config = {
-                          'LambdaConfigurations': [
+                          'LambdaFunctionConfigurations': [
                               {
                                   'Id': 'csv-processing-trigger',
                                   'LambdaFunctionArn': csv_processor_arn,
