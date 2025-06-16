@@ -23,7 +23,7 @@ S3にアップロードされたCSVファイルを自動的にRDS PostgreSQLに�
 ```bash
 # リポジトリをクローン
 git clone https://github.com/te-adachi-dev/AWS-csv-to-rds
-cd aws_cf3
+cd AWS-csv-to-rds
 
 # ディレクトリ構造の確認
 tree
