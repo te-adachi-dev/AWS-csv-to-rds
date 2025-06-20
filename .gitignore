@@ -1,71 +1,46 @@
-# テーブル定義（機密情報）
-sql/
-init-sql/
-*.sql
-
-
-# Python関連
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# 仮想環境
-venv/
 env/
+venv/
 ENV/
 dev_env/
 
-# IDE関連
+# Lambda packages
+*.zip
+
+# Test results
+*.json
+!package.json
+!package-lock.json
+
+# Temporary files
+payload_*.txt
+*.csv
+!sample-data/*.csv
+
+# AWS
+.aws/
+
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS関連
+# OS
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
 
-# AWS関連
-.aws/
-*.pem
-*.key
-
-# ログファイル
+# Logs
 *.log
 logs/
 
-# 一時ファイル
-*.tmp
-*.temp
-*.bak
-
-# デプロイメント関連の機密情報
-deployment_info.txt
-secrets.txt
-config.json*.csv
-response.json
-test-event.json
+# Secrets
+*.pem
+*.key
+secrets/
