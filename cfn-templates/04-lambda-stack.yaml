@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'ETL System - Lambda Functions Stack (Fixed Version)'
+Description: 'ETL System - Lambda Functions Stack (Fixed for Production)'
 
 Parameters:
   ProjectName:
@@ -68,11 +68,10 @@ Parameters:
     Description: 'Data Bucket Name from Database Stack'
 
 Resources:
-  # Lambda Execution Role (RoleNameを削除してAWS自動生成 + タイムスタンプ追加)
+  # Lambda Execution Role (AWS自動生成名を使用)
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      # RoleName を完全に削除してユニーク性を確保
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -84,7 +83,7 @@ Resources:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: !Sub 'S3Access-${AWS::StackName}'
+        - PolicyName: !Sub '${ProjectName}-S3Access-Policy'
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -102,14 +101,12 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-lambda-execution-role'
-        - Key: StackName
-          Value: !Ref 'AWS::StackName'
 
-  # psycopg2 Lambda Layer
+  # psycopg2 Lambda Layer (短い名前に変更)
   Psycopg2Layer:
     Type: AWS::Lambda::LayerVersion
     Properties:
-      LayerName: !Sub '${ProjectName}-psycopg2-layer-${AWS::StackName}'
+      LayerName: !Sub '${ProjectName}-psycopg2-20250619'
       Description: 'psycopg2 library for PostgreSQL connectivity'
       Content:
         S3Bucket: !Ref SourceBucket
@@ -117,11 +114,12 @@ Resources:
       CompatibleRuntimes:
         - python3.11
 
-  # Lambda Function 1: Table Creator
+  # Lambda Function 1: Table Creator (短い名前に変更)
   TableCreatorLambdaFunction:
     Type: AWS::Lambda::Function
+    DependsOn: LambdaExecutionRole
     Properties:
-      FunctionName: !Sub '${ProjectName}-table-creator-${AWS::StackName}'
+      FunctionName: !Sub '${ProjectName}-table-creator'
       Runtime: python3.11
       Handler: table_creator.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
@@ -151,11 +149,12 @@ Resources:
         - Key: Name
           Value: !Sub '${ProjectName}-table-creator'
 
-  # Lambda Function 2: CSV Processor
+  # Lambda Function 2: CSV Processor (短い名前に変更)
   CSVProcessorLambdaFunction:
     Type: AWS::Lambda::Function
+    DependsOn: LambdaExecutionRole
     Properties:
-      FunctionName: !Sub '${ProjectName}-csv-processor-${AWS::StackName}'
+      FunctionName: !Sub '${ProjectName}-csv-processor'
       Runtime: python3.11
       Handler: csv_processor.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
@@ -184,11 +183,12 @@ Resources:
         - Key: Name
           Value: !Sub '${ProjectName}-csv-processor'
 
-  # Lambda Function 3: Query Executor
+  # Lambda Function 3: Query Executor (短い名前に変更)
   QueryExecutorLambdaFunction:
     Type: AWS::Lambda::Function
+    DependsOn: LambdaExecutionRole
     Properties:
-      FunctionName: !Sub '${ProjectName}-query-executor-${AWS::StackName}'
+      FunctionName: !Sub '${ProjectName}-query-executor'
       Runtime: python3.11
       Handler: query_executor.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
