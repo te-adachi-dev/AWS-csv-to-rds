@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'ETL System - Lambda Functions Stack (Fixed for Uniqueness)'
+Description: 'ETL System - Lambda Functions Stack (Fixed for Production)'
 
 Parameters:
   ProjectName:
@@ -117,6 +117,7 @@ Resources:
   # Lambda Function 1: Table Creator (短い名前に変更)
   TableCreatorLambdaFunction:
     Type: AWS::Lambda::Function
+    DependsOn: LambdaExecutionRole
     Properties:
       FunctionName: !Sub '${ProjectName}-table-creator'
       Runtime: python3.11
@@ -151,6 +152,7 @@ Resources:
   # Lambda Function 2: CSV Processor (短い名前に変更)
   CSVProcessorLambdaFunction:
     Type: AWS::Lambda::Function
+    DependsOn: LambdaExecutionRole
     Properties:
       FunctionName: !Sub '${ProjectName}-csv-processor'
       Runtime: python3.11
@@ -184,6 +186,7 @@ Resources:
   # Lambda Function 3: Query Executor (短い名前に変更)
   QueryExecutorLambdaFunction:
     Type: AWS::Lambda::Function
+    DependsOn: LambdaExecutionRole
     Properties:
       FunctionName: !Sub '${ProjectName}-query-executor'
       Runtime: python3.11

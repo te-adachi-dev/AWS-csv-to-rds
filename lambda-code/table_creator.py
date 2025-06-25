@@ -105,28 +105,53 @@ def lambda_handler(event, context):
                 
                 print(f"SQLファイル読み込み完了: {len(sql_content)}文字")
                 
+                # コメントを削除（改良版）
+                # シングルラインコメントを削除
+                sql_content = re.sub(r'--.*$', '', sql_content, flags=re.MULTILINE)
+                # マルチラインコメントを削除
+                sql_content = re.sub(r'/\*.*?\*/', '', sql_content, flags=re.DOTALL)
+                
                 # SQLを実行
                 # セミコロンで分割して複数のSQL文を処理
                 sql_statements = [stmt.strip() for stmt in sql_content.split(';') 
-                                if stmt.strip() and not stmt.strip().startswith('--')]
+                                if stmt.strip()]
                 
                 table_names = []
                 for i, sql_statement in enumerate(sql_statements):
                     if sql_statement:
                         print(f"SQL実行 {i+1}/{len(sql_statements)}: {sql_statement[:150]}...")
                         
-                        # CREATE TABLE文からテーブル名を抽出
-                        create_match = re.search(
-                            r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[`"]?(\w+)[`"]?\.)?[`"]?(\w+)[`"]?', 
-                            sql_statement, re.IGNORECASE | re.DOTALL
-                        )
-                        if create_match:
-                            table_name = create_match.group(2)
-                            if table_name not in table_names:
-                                table_names.append(table_name)
+                        # CREATE TABLE文からテーブル名を抽出（改良版）
+                        # より柔軟なパターンマッチング
+                        create_patterns = [
+                            r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"]?(\w+)[`"]?',
+                            r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)',
+                            r'CREATE\s+TABLE\s+[`"]?(\w+)[`"]?'
+                        ]
                         
-                        cursor.execute(sql_statement)
-                        print(f"SQL実行成功: {i+1}")
+                        table_name = None
+                        for pattern in create_patterns:
+                            create_match = re.search(pattern, sql_statement, re.IGNORECASE | re.DOTALL)
+                            if create_match:
+                                table_name = create_match.group(1)
+                                break
+                        
+                        if table_name and table_name not in table_names:
+                            table_names.append(table_name)
+                            print(f"  -> テーブル '{table_name}' を検出")
+                        
+                        try:
+                            cursor.execute(sql_statement)
+                            print(f"SQL実行成功: {i+1}")
+                        except Exception as e:
+                            print(f"SQL実行エラー（続行）: {e}")
+                            # エラーが発生してもテーブル名は記録
+                            if table_name:
+                                failed_tables.append({
+                                    'file': sql_file,
+                                    'table': table_name,
+                                    'error': str(e)
+                                })
                 
                 if table_names:
                     created_tables.extend(table_names)
@@ -163,7 +188,7 @@ def lambda_handler(event, context):
         if failed_tables:
             print(f"失敗詳細:")
             for fail in failed_tables:
-                print(f"  - {fail['file']}: {fail['error']}")
+                print(f"  - {fail['file']}: {fail.get('error', 'Unknown error')}")
         
         cursor.close()
         conn.close()
