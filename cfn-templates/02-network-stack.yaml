@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'ETL System - Network Infrastructure Stack'
+Description: 'ETL System - Network Infrastructure Stack with Public Subnets'
 
 Parameters:
   ProjectName:
@@ -64,6 +64,17 @@ Resources:
         - Key: Name
           Value: !Sub '${ProjectName}-public-subnet-1'
 
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.102.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-public-subnet-2'
+
   # Route Tables
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
@@ -86,6 +97,12 @@ Resources:
     Properties:
       RouteTableId: !Ref PublicRouteTable
       SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
 
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
@@ -224,6 +241,12 @@ Outputs:
     Value: !Ref PublicSubnet1
     Export:
       Name: !Sub '${ProjectName}-PublicSubnet1Id'
+
+  PublicSubnet2Id:
+    Description: Public Subnet 2 ID
+    Value: !Ref PublicSubnet2
+    Export:
+      Name: !Sub '${ProjectName}-PublicSubnet2Id'
 
   LambdaSecurityGroupId:
     Description: Lambda Security Group ID

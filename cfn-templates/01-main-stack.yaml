@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'ETL System - Main Stack (Parent)'
+Description: 'ETL System - Main Stack with IAM Auth Support'
 
 Parameters:
   ProjectName:
@@ -60,7 +60,7 @@ Resources:
         - Key: Name
           Value: !Sub '${ProjectName}-network-stack'
 
-  # Step 2: データベースとストレージ
+  # Step 2: データベースとストレージ（パブリックアクセス対応）
   DatabaseStorageStack:
     Type: AWS::CloudFormation::Stack
     DependsOn: NetworkStack
@@ -73,12 +73,14 @@ Resources:
         VPCId: !GetAtt NetworkStack.Outputs.VPCId
         PrivateSubnet1Id: !GetAtt NetworkStack.Outputs.PrivateSubnet1Id
         PrivateSubnet2Id: !GetAtt NetworkStack.Outputs.PrivateSubnet2Id
+        PublicSubnet1Id: !GetAtt NetworkStack.Outputs.PublicSubnet1Id
+        PublicSubnet2Id: !GetAtt NetworkStack.Outputs.PublicSubnet2Id
         LambdaSecurityGroupId: !GetAtt NetworkStack.Outputs.LambdaSecurityGroupId
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-database-storage-stack'
 
-  # Step 3: Lambda関数群（通知設定なし）
+  # Step 3: Lambda関数群
   LambdaStack:
     Type: AWS::CloudFormation::Stack
     DependsOn:
@@ -129,6 +131,21 @@ Resources:
         - Key: Name
           Value: !Sub '${ProjectName}-orchestration-stack'
 
+  # Step 5: IAM認証用のリソース
+  IAMAuthStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - DatabaseStorageStack
+    Properties:
+      TemplateURL: !Sub 'https://${SourceBucket}.s3.${AWS::Region}.amazonaws.com/cfn-templates/06-iam-auth-stack.yaml'
+      Parameters:
+        ProjectName: !Ref ProjectName
+        RDSEndpoint: !GetAtt DatabaseStorageStack.Outputs.RDSEndpoint
+        RDSResourceId: !GetAtt DatabaseStorageStack.Outputs.RDSResourceId
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-iam-auth-stack'
+
 Outputs:
   NetworkStackId:
     Description: Network Stack ID
@@ -146,6 +163,10 @@ Outputs:
     Description: Orchestration Stack ID
     Value: !Ref OrchestrationStack
 
+  IAMAuthStackId:
+    Description: IAM Auth Stack ID
+    Value: !Ref IAMAuthStack
+
   DataBucketName:
     Description: Name of the S3 bucket for CSV data and results
     Value: !GetAtt DatabaseStorageStack.Outputs.DataBucketName
@@ -153,6 +174,18 @@ Outputs:
   RDSEndpoint:
     Description: RDS PostgreSQL Endpoint
     Value: !GetAtt DatabaseStorageStack.Outputs.RDSEndpoint
+
+  RDSResourceId:
+    Description: RDS Resource ID for IAM Auth
+    Value: !GetAtt DatabaseStorageStack.Outputs.RDSResourceId
+
+  TestUserAccessKeyId:
+    Description: Test User Access Key ID
+    Value: !GetAtt IAMAuthStack.Outputs.TestUserAccessKeyId
+
+  TestUserSecretAccessKey:
+    Description: Test User Secret Access Key
+    Value: !GetAtt IAMAuthStack.Outputs.TestUserSecretAccessKey
 
   TableCreatorFunction:
     Description: Table Creator Lambda Function Name
