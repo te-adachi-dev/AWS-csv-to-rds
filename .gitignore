@@ -1,29 +1,27 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+# .terraform.lock.hcl はコミット対象なので除外しない
+*.tfvars
+!terraform.tfvars.example
+
+# Temporary files
+*.zip
+result.json
+response.json
+payload.json
+*.csv
+custom_resource.zip
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
 .Python
-env/
 venv/
-ENV/
+env/
 dev_env/
-
-# Lambda packages
-*.zip
-
-# Test results
-*.json
-!package.json
-!package-lock.json
-
-# Temporary files
-payload_*.txt
-*.csv
-!sample-data/*.csv
-
-# AWS
-.aws/
 
 # IDE
 .vscode/
@@ -36,11 +34,13 @@ payload_*.txt
 .DS_Store
 Thumbs.db
 
+# AWS
+.aws/
+
 # Logs
 *.log
 logs/
 
-# Secrets
-*.pem
-*.key
-secrets/
+# Local test files
+test_*.csv
+temp_*.csv

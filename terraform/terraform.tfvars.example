@@ -1,0 +1,29 @@
+# AWS Region
+aws_region = "us-east-2"
+
+# Project Name
+project_name = "etl-csv-to-rds-postgresql"
+
+# Database Settings
+db_master_username = "postgres"
+db_master_password = "TestPassword123!" # 本番環境では環境変数から取得してください
+
+# Source S3 Bucket (Lambda code and SQL files)
+source_bucket = "your-source-bucket-20250614"
+
+# Environment
+environment = "poc"
+
+# VPC CIDR
+vpc_cidr = "10.0.0.0/16"
+
+# RDS Settings
+db_instance_class    = "db.t3.micro"
+db_allocated_storage = 20
+
+# Lambda Code S3 Keys
+csv_processor_code_key  = "lambda-code/csv_processor.zip"
+query_executor_code_key = "lambda-code/query_executor.zip"
+table_creator_code_key  = "lambda-code/table_creator.zip"
+psycopg2_layer_key     = "layers/psycopg2-layer.zip"
+init_sql_prefix        = "init-sql/"

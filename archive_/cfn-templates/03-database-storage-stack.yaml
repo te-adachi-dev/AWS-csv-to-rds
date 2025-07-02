@@ -135,7 +135,7 @@ Outputs:
 
   RDSResourceId:
     Description: RDS Resource ID for IAM policy
-    Value: !Sub 'db-${RDSInstance.ResourceId}'
+    Value: !GetAtt RDSInstance.DbiResourceId
     Export:
       Name: !Sub '${ProjectName}-RDSResourceId'
 
