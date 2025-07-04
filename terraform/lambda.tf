@@ -248,3 +248,49 @@ resource "null_resource" "init_tables" {
     aws_db_instance.main
   ]
 }
+
+# API Query Executor Lambda Function
+resource "aws_lambda_function" "api_query_executor" {
+  function_name = "${var.project_name}-api-query-executor"
+  runtime       = "python3.11"
+  handler       = "api_query_executor.lambda_handler"
+  role          = aws_iam_role.lambda_execution.arn
+  timeout       = 30
+  memory_size   = 512
+
+  s3_bucket = var.source_bucket
+  s3_key    = var.api_query_executor_code_key
+
+  layers = [aws_lambda_layer_version.psycopg2.arn]
+
+  vpc_config {
+    security_group_ids = [aws_security_group.lambda.id]
+    subnet_ids         = [aws_subnet.private_1.id, aws_subnet.private_2.id]
+  }
+
+  environment {
+    variables = {
+      DB_HOST     = aws_db_instance.main.address
+      DB_PORT     = aws_db_instance.main.port
+      DB_NAME     = aws_db_instance.main.db_name
+      DB_USER     = var.db_master_username
+      DB_PASSWORD = var.db_master_password
+    }
+  }
+
+  tags = {
+    Name = "${var.project_name}-api-query-executor"
+  }
+
+  depends_on = [aws_iam_role_policy.lambda_s3_access]
+}
+
+# Lambda Permission for API Gateway
+resource "aws_lambda_permission" "api_gateway_invoke" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.api_query_executor.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.query_api.execution_arn}/*/*"
+}
+

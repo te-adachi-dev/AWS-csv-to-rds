@@ -22,7 +22,9 @@ provider "aws" {
   
   default_tags {
     tags = {
-      ManagedBy = "temp-work"
+      Owner  = "ore"
+      System = "ore_ore"
+      Env    = "dev"
     }
   }
 }

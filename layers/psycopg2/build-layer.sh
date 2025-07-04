@@ -5,8 +5,15 @@ cd "$(dirname "$0")"
 rm -rf temp_layer
 mkdir -p temp_layer/python
 
-# psycopg2のインストール
-pip install -r requirements.txt -t temp_layer/python/
+# psycopg2のインストール（プラットフォーム指定）
+pip install \
+    --platform manylinux2014_x86_64 \
+    --target temp_layer/python/ \
+    --implementation cp \
+    --python-version 3.11 \
+    --only-binary=:all: \
+    --upgrade \
+    psycopg2-binary==2.9.7
 
 # zipファイルの作成
 cd temp_layer

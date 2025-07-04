@@ -43,4 +43,4 @@ logs/
 
 # Local test files
 test_*.csv
-temp_*.csv
+temp_*.csvterraform/terraform.tfstate*

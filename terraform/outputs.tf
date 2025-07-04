@@ -58,3 +58,29 @@ output "deployment_instructions" {
        psql -h ${aws_db_instance.main.address} -U ${var.db_master_username} -d ${aws_db_instance.main.db_name}
   EOT
 }
+
+output "api_gateway_url" {
+  description = "API Gateway URL for Excel queries"
+  value       = "https://${aws_api_gateway_rest_api.query_api.id}.execute-api.${var.aws_region}.amazonaws.com/${aws_api_gateway_stage.prod.stage_name}/query"
+}
+
+output "api_key_value" {
+  description = "API Key for Excel access"
+  value       = aws_api_gateway_api_key.excel_key.value
+  sensitive   = true
+}
+
+output "excel_setup_instructions" {
+  description = "Excel VBA setup instructions"
+  value = <<-EOT
+    === Excel VBA設定手順 ===
+    
+    1. API URL: ${aws_api_gateway_deployment.api.invoke_url}/query
+    2. API Key: 以下のコマンドで取得
+       terraform output -raw api_key_value
+    
+    3. VBAコードに以下を設定:
+       - API_URL = "${aws_api_gateway_deployment.api.invoke_url}/query"
+       - API_KEY = "<上記で取得したキー>"
+  EOT
+}

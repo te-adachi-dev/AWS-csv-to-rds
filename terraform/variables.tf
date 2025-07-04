@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "AWS region"
   type        = string
-  default     = "us-east-2"
+  default     = "ap-northeast-1"
 }
 
 variable "project_name" {
@@ -80,4 +80,10 @@ variable "db_allocated_storage" {
   description = "RDS allocated storage in GB"
   type        = number
   default     = 20
+}
+
+variable "api_query_executor_code_key" {
+  description = "S3 Key for API Query Executor Lambda code"
+  type        = string
+  default     = "lambda-code/api_query_executor.zip"
 }
